@@ -1,0 +1,92 @@
+其实主要就是refresh_pattern的一些理解和建议.
+
+refresh_pattern的作用:
+用于确定一个页面进入cache后，它在cache中停留的时间。refresh_pattern规则仅仅应用到没有明确过时期限的响应。原始服务器能使用Expires头部，或者Cache-Control:max-age指令来指定过时期限。
+
+语法：
+refresh_pattern [-i] regexp min percent max [options]
+
+min参数是分钟数量。它是过时响应的最低时间限制。如果某个响应驻留在cache里的时间没有超过这个最低限制，那么它不会过期。类似的，max参数是存活响应的最高时间限制。如果某个响应驻留在cache里的时间高于这个最高限制，那么它必须被刷新。
+
+在最低和最高时间限制之间的响应，会面对squid的最后修改系数LM-factor算法LM-factor=(response age)/(resource age)。对这样的响应，squid计算响应的年龄和最后修改系数，然后将它作为百分比值进行比较。响应年龄简单的就是从原始服务器产生，或最后一次验证响应后，经历的时间数量。源年龄在Last-Modified和Date头部之间是不同的。LM-factor是响应年龄与源年龄的比率。
+
+
+
+
+概念LM，LM就是页面Header里时间(Date)和Last-Modified时间的差。Date一般是Squid从后面取页面的时间，Last-Modified 一般是页面生成时间。
+refresh_pattern 的语法是
+refresh_pattern [-i] regexp min percent max [options]
+
+min, max的单位是分钟，percent就是百分比。
+refresh_pattern 的算法如下：(当前时间定义为CURRENT_DATE)
+1) If ((CURRENT_DATE-DATE(就是LM里定义的时间)) < min)，cache是新鲜的
+2) else if ((CURRENT_DATE-DATE) < (min + (max-min)*percent)，cache是新鲜的
+3) else cache是过期的
+cache过期就需要从后面server取新鲜内容。
+
+常用的几个参数的意思
+
+override-expire
+该选项导致squid在检查Expires头部之前，先检查min值。这样，一个非零的min时间让squid返回一个未确认的cache命中，即使该响应准备过期。
+
+override-lastmod
+改选项导致squid在检查LM-factor百分比之前先检查min值。
+
+reload-into-ims
+该选项让squid在确认请求里，以no-cache指令传送一个请求。换句话说，squid在转发请求之前，对该请求增加一个If-Modified- Since头部。注意这点仅仅在目标有Last-Modified时间戳时才能工作。外面进来的请求保留no-cache指令，以便它到达原始服务器。
+一般情况可以使用 reload-into-ims。它其实是强行控制对象的超时时间，这违反了http协议的精神，但是在带宽较窄的场合，可以提高明显系统相应时间。
+举例：
+refresh_pattern -i \.css$ 1440 50% 129600 reload-into-ims
+refresh_pattern -i \.xml$ 1440 50% 129600 reload-into-ims
+refresh_pattern -i \.html$ 1440 90% 129600 reload-into-ims
+refresh_pattern -i \.shtml$ 1440 90% 129600 reload-into-ims
+refresh_pattern -i \.hml$ 1440 90% 129600 reload-into-ims
+refresh_pattern -i \.jpg$ 1440 90% 129600 reload-into-ims
+refresh_pattern -i \.png$ 1440 90% 129600 reload-into-ims
+refresh_pattern -i \.gif$ 1440 90% 129600 ignore-reload
+refresh_pattern -i \.bmp$ 1440 90% 129600 reload-into-ims
+refresh_pattern -i \.js$ 1440 90% 129600 reload-into-ims
+
+ignore-reload
+该选项导致squid忽略请求里的任何no-cache指令。
+所以。如果希望内容一进入cache就不删除，直到被主动purge掉为止，可以加上ignore-reload选项,这个我们常用在mp3,wma,wmv,gif之类。
+Examples:
+
+refresh_pattern -i \.mp3$ 1440 50% 2880 ignore-reload
+refresh_pattern -i \.wmv$ 1440 50% 2880 ignore-reload
+refresh_pattern -i \.rm$ 1440 50% 2880 ignore-reload
+refresh_pattern -i \.swf$ 1440 50% 2880 ignore-reload
+refresh_pattern -i \.mpeg$ 1440 50% 2880 ignore-reload
+refresh_pattern -i \.wma$ 1440 50% 2880 ignore-reload
+resource age =对象进入cache的时间-对象的last_modified
+response age =当前时间-对象进入cache的时间
+LM-factor=(response age)/(resource age)
+
+举个例子,这里只考虑percent, 不考虑min 和max
+
+例如：refresh_pattern 20%
+
+假设源服务器上www.aaa.com/index.htm -----lastmodified 是 2007-04-10 02:00:00
+squid上 proxy.aaa.com/index.htm index.htm进入cache的时间 2007-04-10 03:00:00
+
+1）如果当前时间 2007-04-10 03:00:00
+resource age =3点-2点=60分钟
+response age =0分钟
+index.htm还可以在cache停留的时间(resource age)*20%=12分钟
+也就是说，index.htm进入cache后，可以停留12分钟，才被重新确认。
+
+2）如果当前时间 2007-04-10 03:05:00
+resource age =3点-2点=60分钟
+response age =5分钟
+index.htm还可以在cache停留的时间(resource age)*20%=12分钟-5=7
+LM-factor=5/60=8.3%<20%
+
+一直到2007-04-10 03:12:00 LM-factor=12/60=20% 之后，cache中的页面index.htm终于stale。
+如果这时没有index.htm的请求，index.htm会一直在缓存中，如果有index.htm请求，squid收到该请求后，由于已经过期， squid会向源服务器发一个index.htm是否有改变的请求，源服务器收到后，如果index.htm没有更新，squid就不用更新缓存，直接把缓存的内容放回给客户端，同时，重置对象进入cache的时间为与源服务器确认的时间，比如2007-04-10 03:13:00，如果正好在这个后重新确认了页面。重置后，resource age变长，相应在cache中存活的时间也变长。
+
+如果有改变则把最新的index.htm返回给squid,squid收到会更新缓存，然后把新的index.htm返回给客户端,同时根据新页面中的Last_Modified和取页面的时间，重新计算resource age，进一步计算出存活时间。
+
+实际上，一个页面进入cache后，他的存活时间就确定了，即 (resource age) * 百分比，一直到被重新确认。
+
+测试一个防盗链:
+

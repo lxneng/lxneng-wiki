@@ -1,0 +1,164 @@
+1、squid 清楚URL缓存
+squidclient -h 10.0.0.108 -p3128 -m PURGE "http://images.anjukestatic.com/attachments/3/e/4/3e4446d024f5a68c7d4e575e1c38f654.jpg"
+2、squid 配置文件说明
+
+squid配置区分大小写的
+
+cache_effective_user nobody
+指定以特权用户（root）运行后转为的用户角色为nobody,如果不加此参数已特权用户运行将会失败，因为违反了安全规则。
+
+cache_effective_group 如果不设置就是上面用户所在的默认组
+
+http_port 80
+squid监听的HTTP端口 默认为3128 可以随意修改，
+可以多条监控多个端口
+端口号前面可以指定监听IP 如  http_port 1292.168.100.100:80
+
+squid 日志 （cache.log,access.log,store.log）
+如果安装是没有配置 默认squid日志在/usr/local/squid/var/logs 下面
+日志空间不够将引起squid退出或重启，所以要重视
+cache_log /squid/logs/cache.log   指定cache.log
+cache_access_log /squid/logs/access.log  指定access.log
+cache_store_log	/squid/logs/store.log	 指定store.log
+
+squid命令行
+-a port  重新指定新的http_port值
+-d level 让squid将它的调试信息输出到标准错误，就是日志级别。
+-f file  指定另外一个配置文件
+-h 显示帮助
+-k function squid执行不同的管理功能
+		reconfigure 重新读取配置文件
+		rotate	滚动squid的日志
+		shutdown 发送关闭squid的信号 等待活动对话完成
+		interrupt 立即关闭squid 不用等待活动对话完成
+		kill	关闭squid的最后保证
+		debug 把squid设置成完全的调试模式，加入很忙，会很快用完cache目录 （慎用）
+		check 简单检测squid是否运行
+		parse 简单检查squid的配置文件
+-s 激活将日志加入到syslog进程
+-u port 指定另一个icp端口号码，覆盖到squid.cnf里面的icp_http
+-v 打印版本信息
+-z 初始化cache目录，或交换目录，在首次运行squid或增加cache目录时需要次选项
+-D 禁止初始化DNS检测
+-F 让squid拒绝所有请求，直到重新建立起存储单元
+
+squid反向代理对后端进行负载均衡
+八月 6th, 2008 Posted in Squid < by Johnny Woo >
+修改squid.conf文件
+cache_peer 10.11.12.151 parent 80 0 no-query originserver name=web1 round-robin
+cache_peer 10.11.12.146 parent 80 0 no-query originserver name=web2 round-robin
+cache_peer_domain web1 web2 .test.com
+
+这样访问squid时,
+squid会从后端的实际服务器中挑选一台进行抓取
+例子中使用的是RR的方法轮询
+squid同时会对后端的健康状态进行检查
+如果后端服务器down了
+那么squid会从剩余的origin服务器中抓取数据
+
+
+
+
+通过squid.conf配置文件中的cache_peer选项来配置代理服务器阵 
+列，通过其他的选项来控制选择代理伙伴的方法。Cache_peer的使用格式如下： 
+cache_peer  hostname type http_port icp_port 
+共有5个选项可以配置： 
+1. hostname:指被请求的同级子代理服务器或父代理服务器。可以用主机名或ip地址表示； 
+2. type：指明hostname的类型，是同级子代理服务器还是父代理服务器，也即parent（父） 还是 sibling（子）； 
+3. http_port：hostname的监听端口； 
+4. icp_port：hostname上的ICP监听端口，对于不支持ICP协议的可指定7； 
+5. options：可以包含一个或多个关键字。 
+Options可能的关键字有： 
+1． proxy-only：指明从peer得到的数据在本地不进行缓存，缺省地，squid是要缓存这部分数据的； 
+2． weight=n：用于你有多个peer的情况，这时如果多于一个以上的peer拥有你请求的数据时，squid通过计算每个peer的ICP响应时间来 决定其weight的值，然后squid向其中拥有最大weight的peer发出ICP请求。也即weight值越大，其优先级越高。当然你也可以手工 指定其weight值； 
+3． no-query：不向该peer发送ICP请求。如果该peer不可用时，可以使用该选项； 
+4． Default：有点象路由表中的缺省路由，该peer将被用作最后的尝试手段。当你只有一个父代理服务器并且其不支持ICP协议时，可以使用default和 
+no-query选项让所有请求都发送到该父代理服务器； 
+5．login=user:password：当你的父代理服务器要求用户认证时可以使用该选项来进行认证。 
+
+＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝＝
+squidclient使用简介:
+
+查看帮助:./squidclient -h 192.168.1.123 -p 3128 mgr:
+/usr/local/squid/squidclient
+squidclient -h 192.168.1.123 -p 3128 mgr:client_list //查看客户端列表
+squidclient -h 192.168.1.123 -p 3128 mgr:objects //取得已缓存的列表
+squidclient -h 192.168.1.123 -p 3128 mgr:info     //取得运行状态
+
+经验技巧:打开一个网址，访问一下，看看有没有Cache到
+squidclient -h 192.168.1.123 -p 3128 mgr:objects | grep GET | grep xxx.com
+
+统计cache到的总数哈:
+squidclient -h 192.168.1.123 -p 3128 mgr:objects | grep GET | wc -l
+
+
+文章出处：DIY部落(http://www.diybl.com/course/6_system/linux/Linuxjs/20090318/163208.html)
+
+
+
+===================================
+增大file description数量 
+squid的file description参数是一个很重要的参数，如果设置的过小，会导致squid无法工作。这个参数是与系统的open file参数直接相关的，可以通过ulimit -a来查看。
+
+linux系统下默认的open file数量是1024。所以编译安装的squid的file description也是1024。
+
+如果要增大file description，在编译安装squid之前，先执行ulimit -HSn 65535。然后用ulimt -a查看，这时open file应该已经是65535了。
+
+squid2.6
+
+–with-max-fd=65535
+
+squid3.0
+
+–with-filedescriptors=65535
+
+增加squid的snmp支持 
+在编译时增加–enable-snmp，并在配置文件中增加
+
+acl admin src 127.0.0.1
+acl snmpcommunity snmp_community snmppublic
+snmp_port 3401
+snmp_access allow snmpcommunity admin
+snmp_access deny all
+
+127.0.0.1可以替换成snmp管理中心的IP地址。
+
+编译SQUID的参数 
+configure options:  ‘–enable-removal-policies’ ‘–with-large-files’ ‘–enable-follow-x-forwarded-for’ ‘–enable-x-accelerator-vary’ ‘–enable-dlmalloc’ ‘–disable-internal-dns’ ‘–enable-epoll’ ‘–enable-snmp’ ‘–enable-multicast-miss’ ‘–enable-forward-log’ ‘–enable-delay-pools’ ‘–enable-async-io=200′ ‘–prefix=/path/squid’
+
+查看当前SQUID进程的编译参数 
+/squidpath/sbin/squid -v
+
+手动purge一个cache object 
+/squidpath/bin/squidclient -p squidport -m purge url
+
+如果看到200信息，说明cache中的对象已经被purge。如果看到404信息，说明当前cache中没有这个url
+
+查看当前squid的状态信息 
+/squidpath/bin/squidclient -p squidport mgr:info
+
+如果不指定squidport, 默认使用3128端口
+
+解决squid运行一段时间之后占用大量内存的问题 
+定期清空swap.state，具体方法:
+
+/path/squid -k shutdown
+
+echo "">/path/swap.state
+
+/path/squid -D
+
+另外可以把swap.state放在cache_dir之外，提高IO性能
+
+squidclient mgr:info的结果中Number of clients accessing cache的结果为0 
+在squid.conf中去掉client_db off
+
+转发x-forwarded-ip header 
+编译squid的时候，加上–enable-x-forwarded-ip
+
+在squid.conf中加入 
+
+header_access X-Forwarded-For allow all
+
+forwarded_for on
+

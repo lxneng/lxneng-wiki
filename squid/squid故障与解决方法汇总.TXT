@@ -1,0 +1,179 @@
+squid故障与解决方法汇总
+
+1、COSS will not function without large file support (off_t is 4 bytes long. Please reconsider recompiling squid with --with-large-files
+
+
+Bungled squid_webcache.conf 。。。。。。。 
+
+检查是否在编译squid的时候未加入 --with-large-files 选项，如果是，重新加入此选项再编译一次squid
+
+
+ 
+
+2、使用coss缓存格式的时候，squid不断重建cache
+
+可能原因为maxfullbufs值过低，去掉maxfullbufs限制，让其值为无限
+
+
+
+ 
+
+3、日志中有类似如下的内容：
+
+
+2007/03/05 14:46:56| Ready to serve requests.
+
+2007/03/05 14:46:59| clientReadRequest: FD 11 (192.168.1.5:34061) Invalid Request
+
+
+Illegal character in hostname; underscores are not allowed
+
+
+注释： 无效的字符串，访问地址中不允许下划线。
+
+
+
+解决办法 ：
+
+squid  2.5 中，编译的时候加入如下参数
+
+--enable-underscore 
+
+
+允许解析的URL中出现下划线，因为默认squid会认为带下划线的URL地址是非法的，并拒绝访问该地址。
+
+
+
+对于 2.6 版本，编译时没有这个参数，这个参数出现在 squid.conf 的配置文档里，说明是这样的：
+
+
+
+allow_underscore New option to allow _ in hostnames, replacing the similar build time configure option in 2.5 and earlier.
+
+
+
+具体的在 squid.conf 中的参数，可以在配置文档里搜索一下 allow_underscore，看一下配置文档的具体注释。
+
+
+
+ 
+
+4、squid的cache.log日志中又类似如下的警告：
+
+WARNING: 100 swapin MD5 mismatches
+
+
+这个错误是说squid读入一个缓存文件的时候，存储在接口对应的位置的URL不是
+
+squid认为应该存储在那里的数据。这可能是swap.state有错误或文件指到了磁盘
+
+上错误的块（文件系统有错误）。
+
+停止squid应用，删除swap.state然后启动squid，让它通过读取缓存文件来重建缓存
+
+记录，如果重建后仍然出现上面的情况，那应该就是文件系统或磁盘有问题了。
+
+
+
+
+ 
+
+5、日志中出现下面警告： 
+
+Jun 28 11:14:38 localhost squid[27178]: squidaio_queue_request: Syncing pending I/O operations.. (blocking) 
+
+Jun 28 11:14:59 localhost squid[27178]: squidaio_queue_request: Synced 
+
+Jun 28 11:14:59 localhost squid[27178]: storeAufsOpenDone: (2) No such file or directory 
+
+Jun 28 11:14:59 localhost squid[27178]:         /data/squid/cache_webcache1/00/6B/00006B29 
+
+Jun 28 11:14:59 localhost squid[27178]: storeAufsOpenDone: (2) No such file or directory 
+
+Jun 28 11:14:59 localhost squid[27178]:         /data/squid/cache_webcache1/00/DC/0000DC36 
+
+Jun 28 11:14:59 localhost squid[27178]: WARNING: 1 swapin MD5 mismatches 
+
+Jun 28 11:14:59 localhost squid[27178]: WARNING: Disk space over limit: 18925740 KB > 16777216 KB 
+
+Jun 28 11:14:59 localhost squid[27178]: storeAufsOpenDone: (2) No such file or directory 
+
+Jun 28 11:14:59 localhost squid[27178]:         /data/squid/cache_webcache2/00/92/0000924F 
+
+Jun 28 11:14:59 localhost squid[27178]: storeAufsOpenDone: (2) No such file or directory 
+
+Jun 28 11:14:59 localhost squid[27178]:         /data/squid/cache_webcache1/03/6F/00036FB6 
+
+Jun 28 11:14:59 localhost squid[27178]: squidaio_queue_request: Async request queue growing uncontrollably! 
+
+
+解决方法：
+
+检查配置文件，cache设置为aufs文件系统格式，将此设置改为ufs，重建cache缓存目录
+
+
+ 
+
+6、运行reconfigure的时候出现squid: ERROR: no running copy
+
+ 
+
+原因是找不到pid文件，如果不是使用默认的squid.conf作为squid的设置文件，在用squid目录下sbin/squid进行重新启动等动作的时候要加上-f的参数制定配置文件，同时检查pid文件是否存在，有时候可能错误地配置了pid文件到不存在的目录，或者将pid文件配置到了应用没有权限写入的目录，导致没有创建pid文件，如果pid文件不存在，可以手工创建该pid，然后获取squid的pid并写人pid文件。
+
+
+ 
+
+7、squid在压力大的情况下响应非常慢
+
+ 
+
+
+检查是否文件描述符太小，如果是，调整文件描述符限制，重启squid，检查squid运行的文件描述符，如果为调整后的，则在启动脚本处启动squid的地方加入调整文件描述符的命令，否则除此外还需先调整文件描述符限制然后重新编译安装一次squid
+
+
+ 
+
+8、缓存效率下降，查看日志无报错，netstat -na查看连接有比较多的连接为SYN_RE，且多为同一IP过来的连接
+
+  优化TCP网络
+
+ echo 1 > /proc/sys/net/ipv4/tcp_syncookies
+
+ echo 1 > /proc/sys/net/ipv4/tcp_synack_retries
+
+ echo 1  > /proc/sys/net/ipv4/tcp_syn_retries
+
+
+ 
+
+9、缓存效率低，网卡输入输出流量差距很小。
+
+   首先查看系统日志有无squid的报错，如果没有再查看dmesg，看看有无丢包，是否网卡问题，如果没有再查看网关
+
+   使用squid的时候网关问题关系重大，如果网关没有配置正确，将可能导致用户访问不了。
+
+
+
+ 
+
+10、日志报如下错误：squid: Could not determine fully qualified hostname.  Please set 'visible_hostname'
+
+    检查/etc/hosts文件、/etc/sysconfig/network文件、和hostname命令结果，看看三者是否对应，如果不对应，需要修改为对应，并且/etc/hosts文件中对应的配置还需要有合法域名格式
+
+   /etc/sysconfig/network中的hostname是系统启动时候加载的hostname值，如果此值与/etc/hosts文件中的值不对应并且squid中没有设置visible_hostname选项的话，会导致系统重启后squid不能正常启动。
+
+
+ 
+
+11、日志大量报如下错误：
+
+Apr 29 08:28:56 localhost squid[13851]: httpReadReply: Excess data from "HEAD http://192.168.230.1/" 
+
+Apr 29 08:28:56 localhost squid[13851]: httpReadReply: Excess data from "HEAD http://192.168.230.1/" 
+
+
+ 这表明服务器返回一个超过squid声明的响应对象最大值的返回值。
+
+它违反了HTTP协议并导致服务器返回被截断。
+
+
